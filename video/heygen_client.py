@@ -20,8 +20,8 @@ VIDEO_GENERATE_ENDPOINT = f"{HEYGEN_BASE_URL}/v2/video/generate"
 VIDEO_STATUS_ENDPOINT = f"{HEYGEN_BASE_URL}/v1/video_status.get"
 
 # Polling settings
-MAX_POLLING_ATTEMPTS = 69
-POLLING_INTERVAL = 15  # seconds
+MAX_POLLING_ATTEMPTS = 200
+POLLING_INTERVAL = 20  # seconds
 
 async def create_heygen_video(
     avatar_id: str,

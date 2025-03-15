@@ -194,9 +194,8 @@ async def run_pipeline(
             
             logger.info(f"Created {total_clusters} text clusters")
             
-            # Create all video generation tasks
-            video_tasks = []
-            video_metadata = []
+            # Process each cluster fully and sequentially
+            video_downloads = []
             
             # Process clusters in their original order
             for cluster in text_clusters:
@@ -216,21 +215,48 @@ async def run_pipeline(
                     "reversed_index": reversed_index,
                     "avatar_id": current_avatar_id
                 }
-                video_metadata.append(metadata)
                 
-                # Schedule video creation with text input
-                task = create_heygen_video(
-                    avatar_id=current_avatar_id,
-                    avatar_style=config.avatar_style,
-                    background_color=config.background_color,
-                    width=config.width,
-                    height=config.height,
-                    api_key=api_keys["heygen_api_key"],
-                    input_text=cluster["text"],
-                    voice_id=config.heygen_voice_id,
-                    emotion=config.heygen_emotion
-                )
-                video_tasks.append(task)
+                # Step 1: Create video
+                logger.info(f"Creating video for text cluster {cluster['original_order']+1}/{total_clusters}...")
+                try:
+                    video_id = await create_heygen_video(
+                        avatar_id=current_avatar_id,
+                        avatar_style=config.avatar_style,
+                        background_color=config.background_color,
+                        width=config.width,
+                        height=config.height,
+                        api_key=api_keys["heygen_api_key"],
+                        input_text=cluster["text"],
+                        voice_id=config.heygen_voice_id,
+                        emotion=config.heygen_emotion
+                    )
+                    
+                    # Step 2: Poll video status
+                    logger.info(f"Polling status for video {cluster['original_order']+1}/{total_clusters}: {video_id}")
+                    status = await poll_video_status(video_id, api_keys["heygen_api_key"])
+                    video_url = status.get("video_url")
+                    if not video_url:
+                        raise ValueError(f"No video URL in status for video {video_id}")
+                    
+                    # Step 3: Download video
+                    output_path = output_dir / f"video_cluster_{cluster['original_order']}.mp4"
+                    path = await download_video(video_url, str(output_path))
+                    
+                    result = {
+                        "path": path,
+                        "order": cluster["original_order"]
+                    }
+                    video_downloads.append(result)
+                    logger.info(f"Downloaded video {cluster['original_order']+1}/{total_clusters}: {path}")
+                    
+                    # Add a delay before processing the next video (if there is one)
+                    if cluster["original_order"] < total_clusters - 1:
+                        logger.info("Waiting 5 seconds before processing next video...")
+                        await asyncio.sleep(5)
+                        
+                except Exception as e:
+                    logger.error(f"Error processing cluster {cluster['original_order']+1}: {str(e)}")
+                    raise
         else:
             # Original approach using ElevenLabs + audio upload
             logger.info("Using ElevenLabs for text-to-speech")
@@ -252,8 +278,9 @@ async def run_pipeline(
             public_urls = await upload_audio_to_public_url(audio_files)
             total_clusters = len(public_urls)
             
-            # Create all video generation tasks
-            video_tasks = []
+            # Process each audio URL fully and sequentially
+            video_downloads = []
+            
             for i, url in enumerate(public_urls):
                 # Determine avatar pose (alternating based on reversed index)
                 reversed_index = total_clusters - 1 - i
@@ -264,67 +291,47 @@ async def run_pipeline(
                 
                 logger.info(f"Processing audio cluster {i+1}/{total_clusters}: Using avatar {current_avatar_id}")
                 
-                # Schedule video creation with audio URL
-                task = create_heygen_video(
-                    avatar_id=current_avatar_id,
-                    avatar_style=config.avatar_style,
-                    background_color=config.background_color,
-                    width=config.width,
-                    height=config.height,
-                    api_key=api_keys["heygen_api_key"],
-                    audio_url=url
-                )
-                video_tasks.append(task)
+                # Step 1: Create video
+                logger.info(f"Creating video for audio cluster {i+1}/{total_clusters}...")
+                try:
+                    video_id = await create_heygen_video(
+                        avatar_id=current_avatar_id,
+                        avatar_style=config.avatar_style,
+                        background_color=config.background_color,
+                        width=config.width,
+                        height=config.height,
+                        api_key=api_keys["heygen_api_key"],
+                        audio_url=url
+                    )
+                    
+                    # Step 2: Poll video status
+                    logger.info(f"Polling status for video {i+1}/{total_clusters}: {video_id}")
+                    status = await poll_video_status(video_id, api_keys["heygen_api_key"])
+                    video_url = status.get("video_url")
+                    if not video_url:
+                        raise ValueError(f"No video URL in status for video {video_id}")
+                    
+                    # Step 3: Download video
+                    output_path = output_dir / f"video_cluster_{i}.mp4"
+                    path = await download_video(video_url, str(output_path))
+                    
+                    result = {
+                        "path": path,
+                        "order": i
+                    }
+                    video_downloads.append(result)
+                    logger.info(f"Downloaded video {i+1}/{total_clusters}: {path}")
+                    
+                    # Add a delay before processing the next video (if there is one)
+                    if i < total_clusters - 1:
+                        logger.info("Waiting 5 seconds before processing next video...")
+                        await asyncio.sleep(5)
+                        
+                except Exception as e:
+                    logger.error(f"Error processing audio cluster {i+1}: {str(e)}")
+                    raise
         
-        # Wait for all video creation requests to complete
-        logger.info(f"Submitting {len(video_tasks)} video generation requests...")
-        video_ids = await asyncio.gather(*video_tasks)
-        
-        # Associate video IDs with their metadata
-        for i, vid in enumerate(video_ids):
-            if config.use_heygen_voice:
-                video_metadata[i]["video_id"] = vid
-        
-        # Poll and download videos
-        logger.info("Waiting for videos to complete...")
-        video_downloads = []
-        
-        if config.use_heygen_voice:
-            # Create polling tasks for all videos
-            polling_tasks = []
-            for i, meta in enumerate(video_metadata):
-                vid = meta["video_id"]
-                logger.info(f"Setting up polling for video {i+1}/{total_clusters}: {vid} (Avatar: {meta['avatar_id']})")
-                # Create a task that polls this video and includes metadata for proper ordering
-                task = asyncio.create_task(poll_and_download_video(
-                    vid, 
-                    api_keys["heygen_api_key"], 
-                    output_dir / f"video_cluster_{i}.mp4",
-                    meta
-                ))
-                polling_tasks.append(task)
-            
-            # Process videos as they complete
-            for completed_task in asyncio.as_completed(polling_tasks):
-                result = await completed_task
-                video_downloads.append(result)
-                logger.info(f"Downloaded video {len(video_downloads)}/{total_clusters}: {result['path']}")
-                
-        else:
-            # Original ElevenLabs approach - poll sequentially
-            for i, vid in enumerate(video_ids):
-                logger.info(f"Polling video {i+1}/{total_clusters}: {vid}")
-                status = await poll_video_status(vid, api_keys["heygen_api_key"])
-                video_url = status.get("video_url")
-                if not video_url:
-                    raise ValueError(f"No video URL in status for video {vid}")
-                
-                output_path = output_dir / f"video_cluster_{i}.mp4"
-                path = await download_video(video_url, str(output_path))
-                video_downloads.append({"path": path, "order": i})
-                logger.info(f"Downloaded video {i+1}/{total_clusters}")
-        
-        # Sort video paths by order for merging
+        # Now that all videos are processed, sort video paths by order for merging
         video_paths = [item["path"] for item in sorted(video_downloads, key=lambda x: x["order"])]
         
         # Merge videos
@@ -380,14 +387,31 @@ async def run_pipeline(
             
             # Add details about avatar distribution
             avatar_counts = {}
-            for meta in video_metadata:
-                avatar_id = meta["avatar_id"]
-                if avatar_id in avatar_counts:
-                    avatar_counts[avatar_id] += 1
-                else:
-                    avatar_counts[avatar_id] = 1
-            
-            result["avatar_distribution"] = avatar_counts
+            if config.use_heygen_voice:
+                # We don't have avatar_id in video_downloads anymore, so we need to count
+                # based on which avatar was used for each cluster
+                front_count = 0
+                side_count = 0
+                
+                for i in range(total_clusters):
+                    # Determine avatar pose using the same logic as when creating videos
+                    reversed_index = total_clusters - 1 - i
+                    current_avatar_id = (
+                        config.front_avatar_id if reversed_index % 2 == 0 
+                        else config.side_avatar_id
+                    )
+                    
+                    if current_avatar_id == config.front_avatar_id:
+                        front_count += 1
+                    else:
+                        side_count += 1
+                
+                # Add counts to result
+                avatar_counts[config.front_avatar_id] = front_count
+                avatar_counts[config.side_avatar_id] = side_count
+                
+                # Add to result
+                result["avatar_distribution"] = avatar_counts
         else:
             result["audio_files"] = audio_files
         

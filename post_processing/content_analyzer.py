@@ -244,21 +244,23 @@ class ContentAnalyzer:
         video_files: List[str], 
         num_points: int = 2,
         min_spacing: float = 10.0,
-        edge_buffer: float = 5.0
+        edge_buffer: float = 5.0,
+        fixed_interval: float = 7.0  # New parameter with default 7 seconds
     ) -> List[Dict[str, Any]]:
         """
-        Determine optimal points for B-roll insertion.
+        Determine optimal points for B-roll insertion using fixed intervals.
         
         Args:
             video_files: List of video segment files
-            num_points: Number of B-roll insertion points
-            min_spacing: Minimum spacing between B-roll points in seconds
+            num_points: Maximum number of B-roll insertion points
+            min_spacing: Minimum spacing between B-roll points (not used for fixed interval)
             edge_buffer: Minimum distance from start/end of complete video
+            fixed_interval: Fixed interval in seconds between B-roll clips
             
         Returns:
             List of B-roll insertion points with timing information
         """
-        logger.info(f"Determining B-roll points for {len(video_files)} video segments")
+        logger.info(f"Determining B-roll points at {fixed_interval}s intervals for {len(video_files)} video segments")
         
         # Get total duration and build timeline
         timeline = []
@@ -293,35 +295,37 @@ class ContentAnalyzer:
         valid_end = total_duration - edge_buffer
         valid_duration = valid_end - valid_start
         
-        # Calculate even spacing for B-roll points
-        points = []
-        if num_points > 0 and valid_duration > 0:
-            # Ensure minimum spacing
-            max_possible_points = max(1, int(valid_duration / min_spacing))
-            actual_points = min(num_points, max_possible_points)
-            
-            # Calculate evenly spaced points
-            spacing = valid_duration / (actual_points + 1)
-            
-            for i in range(1, actual_points + 1):
-                point_time = valid_start + (spacing * i)
-                
-                # Find which segment contains this point
-                for segment in timeline:
-                    if segment["start_time"] <= point_time < segment["end_time"]:
-                        # Calculate time within this specific file
-                        file_relative_time = point_time - segment["start_time"]
-                        
-                        point = {
-                            "global_time": point_time,
-                            "file_index": segment["file_index"],
-                            "file_path": segment["file_path"],
-                            "file_time": file_relative_time
-                        }
-                        points.append(point)
-                        break
+        # Calculate how many points we can fit with the fixed interval
+        max_possible_points = max(1, int(valid_duration / fixed_interval))
         
-        logger.info(f"Determined {len(points)} B-roll insertion points")
+        # Respect the num_points limit if provided
+        actual_points = min(max_possible_points, num_points) if num_points > 0 else max_possible_points
+        
+        points = []
+        # Place points at fixed intervals
+        for i in range(1, actual_points + 1):
+            point_time = valid_start + (fixed_interval * i)
+            
+            # Ensure we don't exceed the valid end time
+            if point_time >= valid_end:
+                break
+            
+            # Find which segment contains this point
+            for segment in timeline:
+                if segment["start_time"] <= point_time < segment["end_time"]:
+                    # Calculate time within this specific file
+                    file_relative_time = point_time - segment["start_time"]
+                    
+                    point = {
+                        "global_time": point_time,
+                        "file_index": segment["file_index"],
+                        "file_path": segment["file_path"],
+                        "file_time": file_relative_time
+                    }
+                    points.append(point)
+                    break
+        
+        logger.info(f"Determined {len(points)} B-roll insertion points at {fixed_interval}s intervals")
         for p in points:
             logger.info(f"B-roll point at {p['global_time']:.2f}s (file {p['file_index']}, time {p['file_time']:.2f}s)")
             

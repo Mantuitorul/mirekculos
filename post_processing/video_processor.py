@@ -13,8 +13,10 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 
 # Direct imports from specific modules instead of using moviepy.editor
-from moviepy.editor import VideoFileClip
-from moviepy.editor import concatenate_videoclips
+import moviepy
+print(moviepy.__version__)
+from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy import concatenate_videoclips
 
 # Configure logging
 logger = logging.getLogger(__name__)

@@ -10,15 +10,12 @@ from pipeline_runner import run_pipeline
 if __name__ == "__main__":
     # Set your parameters here
     TEXT = """
-        Distracția este una dintre cele mai mari plăceri ale vieții! Indiferent 
-        dacă joci sportul tău preferat, petreci timp cu prietenii și familia sau 
-        doar te relaxezi cu o carte bună, distracția poate lua multe forme. 
-        Unii oameni găsesc bucurie în activități creative, precum pictura sau muzica, 
-        în timp ce alții preferă aventurile în aer liber, cum ar fi drumețiile sau înotul. 
-        Cheia este să descoperi ce te face să zâmbești și să te bucuri pe deplin de acele 
-        momente. Nu uita să râzi, să dansezi și să te joci – aceste gesturi simple pot 
-        însenina chiar și cele mai întunecate zile. Viața e prea scurtă pentru a fi mereu 
-        serioși, așa că asigură-te că îți faci loc pentru bucurie și joacă în rutina ta zilnică.
+        Educația românească intră într-o nouă eră: Ministerul Educației devine Ministerul Educației și Cercetării!
+        Hotărârea nr. 187 din 27 februarie 2025 deschide drumul spre inovație și conectează cercetarea la sistemul de învățământ.
+        Elevii, studenții, profesorii și chiar antreprenorii au acum șansa să profite de un viitor mai dinamic și orientat spre tehnologie.
+        Citește articolul complet și vezi cum schimbă această decizie piața muncii și viitorul României.
+        Tu crezi că e începutul unei revoluții în educație?
+        Platforma „ai aflat” este asistentul AI pentru legile din România, unde poți afla orice despre legi!
     """
     
     # Required parameters: avatar IDs for front and side poses

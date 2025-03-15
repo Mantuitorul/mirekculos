@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 # Assuming average word length of 5 characters + 1 space = 6 characters per word
 # This gives us roughly 15 characters per second
 CHARS_PER_SECOND = 15
-TARGET_MIN_SECONDS = 9  # Minimum target seconds per chunk
-TARGET_MAX_SECONDS = 11  # Maximum target seconds per chunk
+TARGET_MIN_SECONDS = 4  # Minimum target seconds per chunk
+TARGET_MAX_SECONDS = 7  # Maximum target seconds per chunk
 DEFAULT_TARGET_SECONDS = 10  # Default target for function parameter
 
 def split_text_into_chunks(text: str, target_seconds_per_chunk: int = DEFAULT_TARGET_SECONDS) -> List[str]:
