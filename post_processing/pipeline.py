@@ -14,6 +14,7 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 from .content_analyzer import ContentAnalyzer
 from .broll_service import BRollService
 from .video_processor import VideoProcessor
+from .query_enhancer import QueryEnhancer
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -21,16 +22,18 @@ logger = logging.getLogger(__name__)
 class PostProcessingPipeline:
     """Orchestrates the B-roll insertion post-processing workflow"""
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, openai_api_key: Optional[str] = None):
         """
         Initialize the post-processing pipeline.
         
         Args:
             api_key: Pexels API key (defaults to PEXELS_API_KEY environment variable)
+            openai_api_key: OpenAI API key for query enhancement (defaults to OPENAI_API_KEY environment variable)
         """
         self.content_analyzer = ContentAnalyzer()
         self.broll_service = BRollService(api_key)
         self.video_processor = VideoProcessor()
+        self.query_enhancer = QueryEnhancer(openai_api_key)
         
     async def process(
         self,
@@ -43,7 +46,8 @@ class PostProcessingPipeline:
         orientation: str = "landscape",
         video_size: str = "medium",
         max_keywords: int = 5,
-        fixed_interval: float = 7.0  # New parameter
+        fixed_interval: float = 7.0,  # New parameter
+        enhance_queries: bool = True  # New parameter to enable/disable query enhancement
     ) -> str:
         """
         Process a single video with B-roll.
@@ -59,6 +63,7 @@ class PostProcessingPipeline:
             video_size: Minimum video size (large=4K, medium=Full HD, small=HD)
             max_keywords: Maximum number of keywords to extract
             fixed_interval: Fixed interval in seconds for B-roll insertion
+            enhance_queries: Whether to use OpenAI to enhance search queries
             
         Returns:
             Path to the processed video
@@ -68,6 +73,13 @@ class PostProcessingPipeline:
         # Step 1: Extract keywords from text
         keywords = self.content_analyzer.extract_keywords(text, max_keywords)
         logger.info(f"Extracted keywords: {keywords}")
+        
+        # Step 1.5: Enhance keywords using OpenAI if enabled
+        if enhance_queries:
+            enhanced_keywords = self.query_enhancer.enhance_keywords(keywords, max_keywords)
+            if enhanced_keywords != keywords:
+                logger.info(f"Using enhanced keywords: {enhanced_keywords}")
+                keywords = enhanced_keywords
         
         # Estimate video duration to calculate number of B-roll clips needed
         video_duration = 0
@@ -137,7 +149,8 @@ class PostProcessingPipeline:
         orientation: str = "landscape",
         video_size: str = "medium",
         max_keywords: int = 5,
-        fixed_interval: float = 7.0  # New parameter
+        fixed_interval: float = 7.0,  # New parameter
+        enhance_queries: bool = True  # New parameter to enable/disable query enhancement
     ) -> str:
         """
         Process multiple video files with B-roll.
@@ -153,6 +166,7 @@ class PostProcessingPipeline:
             video_size: Minimum video size (large=4K, medium=Full HD, small=HD)
             max_keywords: Maximum number of keywords to extract
             fixed_interval: Fixed interval in seconds for B-roll insertion
+            enhance_queries: Whether to use OpenAI to enhance search queries
             
         Returns:
             Path to the processed video
@@ -162,6 +176,13 @@ class PostProcessingPipeline:
         # Step 1: Extract keywords from text
         keywords = self.content_analyzer.extract_keywords(text, max_keywords)
         logger.info(f"Extracted keywords: {keywords}")
+        
+        # Step 1.5: Enhance keywords using OpenAI if enabled
+        if enhance_queries:
+            enhanced_keywords = self.query_enhancer.enhance_keywords(keywords, max_keywords)
+            if enhanced_keywords != keywords:
+                logger.info(f"Using enhanced keywords: {enhanced_keywords}")
+                keywords = enhanced_keywords
         
         # Estimate total video duration to calculate number of B-roll clips needed
         total_duration = 0
@@ -234,7 +255,9 @@ async def apply_broll_post_processing(
     num_broll: int = 2,
     broll_duration: float = 5.0,
     api_key: Optional[str] = None,
-    fixed_interval: float = 7.0  # New parameter
+    fixed_interval: float = 7.0,  # New parameter
+    openai_api_key: Optional[str] = None,  # New parameter
+    enhance_queries: bool = True  # New parameter
 ) -> str:
     """
     Apply B-roll post-processing to video(s).
@@ -248,11 +271,13 @@ async def apply_broll_post_processing(
         broll_duration: Duration of each B-roll segment in seconds
         api_key: Pexels API key (defaults to PEXELS_API_KEY environment variable)
         fixed_interval: Interval in seconds between B-roll insertions
+        openai_api_key: OpenAI API key for query enhancement
+        enhance_queries: Whether to use OpenAI to enhance search queries
         
     Returns:
         Path to the processed video
     """
-    pipeline = PostProcessingPipeline(api_key)
+    pipeline = PostProcessingPipeline(api_key, openai_api_key)
     
     if output_filename is None:
         output_filename = "final_with_broll.mp4"
@@ -268,7 +293,8 @@ async def apply_broll_post_processing(
             output_dir=output_dir,
             num_broll=num_broll,
             broll_duration=broll_duration,
-            fixed_interval=fixed_interval
+            fixed_interval=fixed_interval,
+            enhance_queries=enhance_queries
         )
     else:
         return await pipeline.process_multifile(
@@ -278,5 +304,6 @@ async def apply_broll_post_processing(
             output_dir=output_dir,
             num_broll=num_broll,
             broll_duration=broll_duration,
-            fixed_interval=fixed_interval
+            fixed_interval=fixed_interval,
+            enhance_queries=enhance_queries
         )

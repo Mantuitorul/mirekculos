@@ -52,6 +52,8 @@ async def process_existing_video(
     num_broll: int = 3,
     broll_duration: float = 5.0,
     api_key: Optional[str] = None,
+    openai_api_key: Optional[str] = None,
+    enhance_queries: bool = True,
     language: Optional[str] = None
 ):
     """
@@ -65,6 +67,8 @@ async def process_existing_video(
         num_broll: Number of B-roll segments to insert
         broll_duration: Duration of each B-roll segment
         api_key: Pexels API key (optional)
+        openai_api_key: OpenAI API key for query enhancement (optional)
+        enhance_queries: Whether to use OpenAI to enhance search queries
         language: Language of the text (optional, auto-detected if not provided)
     """
     # Ensure output directory exists
@@ -82,6 +86,13 @@ async def process_existing_video(
         api_key = os.getenv("PEXELS_API_KEY")
         if not api_key:
             logger.warning("No Pexels API key found! Set PEXELS_API_KEY in .env file or pass with --api-key")
+    
+    # Use OpenAI API key from env var if not provided
+    if not openai_api_key:
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key and enhance_queries:
+            logger.warning("No OpenAI API key found! Set OPENAI_API_KEY in .env file or pass with --openai-api-key. Query enhancement will be disabled.")
+            enhance_queries = False
     
     # Import module here to ensure NLTK is initialized first
     try:
@@ -103,7 +114,9 @@ async def process_existing_video(
             output_filename=output_filename,
             num_broll=num_broll,
             broll_duration=broll_duration,
-            api_key=api_key
+            api_key=api_key,
+            openai_api_key=openai_api_key,
+            enhance_queries=enhance_queries
         )
         
         logger.info(f"Processing complete! Video saved to: {result_path}")
@@ -162,6 +175,25 @@ def main():
     )
     
     parser.add_argument(
+        "--openai-api-key", "-ok",
+        help="OpenAI API key for query enhancement (defaults to OPENAI_API_KEY environment variable)"
+    )
+    
+    parser.add_argument(
+        "--enhance-queries", "-eq",
+        action="store_true",
+        default=True,
+        help="Use OpenAI to enhance search queries (default: True)"
+    )
+    
+    parser.add_argument(
+        "--no-enhance-queries", "-neq",
+        action="store_false",
+        dest="enhance_queries",
+        help="Disable OpenAI query enhancement"
+    )
+    
+    parser.add_argument(
         "--text-file", "-tf",
         help="Text file containing the original content (alternative to --text)"
     )
@@ -199,6 +231,8 @@ def main():
         num_broll=args.num_broll,
         broll_duration=args.broll_duration,
         api_key=args.api_key,
+        openai_api_key=args.openai_api_key,
+        enhance_queries=args.enhance_queries,
         language=args.language
     ))
 
