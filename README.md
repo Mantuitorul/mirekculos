@@ -1,16 +1,6 @@
-# Video Generation Pipeline
+# AI Video Generation Pipeline
 
 A modular, clean pipeline for generating AI videos from text using HeyGen avatars and Pexels B-roll footage.
-
-## Table of Contents
-
-- [Features](#features)
-- [Project Structure](#project-structure)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Configuration](#configuration)
-- [Examples](#examples)
-- [Development](#development)
 
 ## Features
 
@@ -18,31 +8,33 @@ A modular, clean pipeline for generating AI videos from text using HeyGen avatar
 - Automatically structure content with ChatGPT
 - Use HeyGen for AI avatar generation
 - Enhance videos with B-roll footage from Pexels
-- Modular architecture with clean separation of concerns
+- Modular architecture for easy maintenance
 - Support for parallel processing with multiple API keys
 - Configurable video resolution, styling and formatting
 
 ## Project Structure
 
-The project has been refactored to follow a clean, modular structure:
+The project follows a clean, modular structure:
 
 ```
 .
 ├── core/                  # Core pipeline components
-│   ├── __init__.py        # Package initialization
+│   ├── __init__.py
 │   ├── config.py          # Configuration management
 │   └── pipeline.py        # Main pipeline orchestration
-├── text/                  # Text processing components
-│   ├── chatgpt_integration.py  # ChatGPT integration for structuring
-│   ├── segmentation.py    # Text segmentation utilities
-│   └── clustering.py      # Text clustering utilities
-├── video/                 # Video processing components
-│   ├── heygen_client.py   # HeyGen API client
-│   └── merger.py          # Video merging utilities
-├── audio/                 # Audio processing components
-├── utils/                 # Common utilities
-├── main.py                # Main command-line entry point
-├── pipeline_heygen_voice.py  # Legacy entry point
+├── text/
+│   ├── __init__.py
+│   └── processing.py      # Text processing (segmentation, clustering, ChatGPT)
+├── video/
+│   ├── __init__.py
+│   ├── heygen.py          # HeyGen API client
+│   ├── broll.py           # B-roll handling
+│   └── merger.py          # Video merging
+├── audio/
+│   ├── __init__.py
+│   └── processing.py      # Audio generation and processing
+├── main.py                # Command-line entry point
+├── requirements.txt       # Dependencies
 └── README.md              # This file
 ```
 
@@ -50,11 +42,11 @@ The project has been refactored to follow a clean, modular structure:
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/video-generation.git
-   cd video-generation
+   git clone https://github.com/yourusername/ai-video-generation.git
+   cd ai-video-generation
    ```
 
-2. Create a virtual environment (Python 3.8+ recommended):
+2. Create a virtual environment:
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -66,7 +58,7 @@ The project has been refactored to follow a clean, modular structure:
    ```
 
 4. Set up your API keys in a `.env` file:
-   ```
+   ```ini
    HEYGEN_API_KEY=your_heygen_api_key
    OPENAI_API_KEY=your_openai_api_key
    PEXELS_API_KEY=your_pexels_api_key
@@ -102,6 +94,8 @@ python main.py --text "Your text here" --front-avatar "avatar_id_1" --side-avata
 
 ### Python API
 
+You can also use the pipeline as a Python API:
+
 ```python
 import asyncio
 from core import Pipeline
@@ -127,6 +121,13 @@ async def generate_video():
 asyncio.run(generate_video())
 ```
 
+## Pipeline Process
+
+1. **Text Structuring**: Text is segmented and structured into video segments with shot types (front, side, broll) using ChatGPT.
+2. **Video Generation**: Videos are generated with HeyGen for each segment.
+3. **B-roll Processing**: If the segment is marked as B-roll, audio is extracted and used with video footage from Pexels.
+4. **Video Merging**: All segments are merged into a final video with B-roll replacements as needed.
+
 ## Configuration
 
 The pipeline uses a centralized configuration system. You can customize configuration by creating a `Config` object:
@@ -145,26 +146,23 @@ openai_key = config.openai_api_key
 pipeline = Pipeline(config=config)
 ```
 
-## Examples
+## Requirements
 
-See `pipeline_heygen_voice.py` for a full working example.
+- Python 3.8+
+- API keys for:
+  - HeyGen (for avatar generation)
+  - OpenAI (for ChatGPT integration)
+  - Pexels (for B-roll footage)
+  - ElevenLabs (for TTS if using ElevenLabs)
 
-## Development
+## Extending the Pipeline
 
 To extend the pipeline:
 
 1. Add new functionality to the relevant module (text, video, audio)
 2. Update the Pipeline class to use your new functionality
-3. Add tests for your new functionality
+3. Add tests for your new functionality (if applicable)
 
-### Adding New AI Providers
+## License
 
-To add a new AI provider:
-
-1. Create a new client in the appropriate module
-2. Implement required methods for integration
-3. Update the Pipeline class to conditionally use your provider
-
-### Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+This project is licensed under a custom license - see the LICENSE file for details.

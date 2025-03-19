@@ -50,9 +50,6 @@ class Config:
             
         Returns:
             Dict with API keys
-        
-        Raises:
-            ValueError: If required API keys are missing
         """
         if env_file:
             env_path = env_file
@@ -65,7 +62,7 @@ class Config:
         else:
             self.logger.warning("No .env file found! Make sure to provide API keys directly.")
         
-        # Load all HeyGen API keys (looking for HEYGEN_API_KEY_BE, HEYGEN_API_KEY_MIR, etc.)
+        # Load all HeyGen API keys (looking for HEYGEN_API_KEY_1, HEYGEN_API_KEY_2, etc.)
         heygen_api_keys = []
         for key in os.environ:
             if key.startswith("HEYGEN_API_KEY_"):
@@ -77,31 +74,25 @@ class Config:
             if heygen_api_key:
                 heygen_api_keys.append(heygen_api_key)
         
-        elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        pexels_api_key = os.getenv("PEXELS_API_KEY")
-        
-        if not heygen_api_keys:
-            raise ValueError("No HEYGEN_API_KEY found in environment variables")
-        
+        # Store config values
         self._config = {
             "heygen_api_keys": heygen_api_keys,
-            "elevenlabs_api_key": elevenlabs_api_key,
-            "openai_api_key": openai_api_key,
-            "pexels_api_key": pexels_api_key
+            "elevenlabs_api_key": os.getenv("ELEVENLABS_API_KEY"),
+            "openai_api_key": os.getenv("OPENAI_API_KEY"),
+            "pexels_api_key": os.getenv("PEXELS_API_KEY")
         }
         
         # Log loaded keys count
         self.logger.info(f"Loaded {len(heygen_api_keys)} HeyGen API keys")
         
         # Log warnings for missing optional keys
-        if not elevenlabs_api_key:
+        if not self._config["elevenlabs_api_key"]:
             self.logger.warning("ELEVENLABS_API_KEY not found in environment variables")
         
-        if not pexels_api_key:
+        if not self._config["pexels_api_key"]:
             self.logger.warning("PEXELS_API_KEY not found in environment variables. B-roll fetching will not work.")
         
-        if not openai_api_key:
+        if not self._config["openai_api_key"]:
             self.logger.warning("OPENAI_API_KEY not found in environment variables. ChatGPT integration will not work.")
             
         return self._config
@@ -161,8 +152,8 @@ def load_environment(env_file: Optional[str] = None) -> Dict[str, Any]:
     """
     config = Config(env_file)
     return {
-        "heygen_api_keys": config.heygen_api_keys,
-        "elevenlabs_api_key": config.elevenlabs_api_key,
-        "openai_api_key": config.openai_api_key,
-        "pexels_api_key": config.pexels_api_key
-    } 
+        "HEYGEN_API_KEYS": config.heygen_api_keys,
+        "ELEVENLABS_API_KEY": config.elevenlabs_api_key,
+        "OPENAI_API_KEY": config.openai_api_key,
+        "PEXELS_API_KEY": config.pexels_api_key
+    }

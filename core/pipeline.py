@@ -83,52 +83,60 @@ class Pipeline:
         """
         self.logger.info("Starting video generation pipeline")
         
-        # Step 1: Structure the text with ChatGPT
-        segments = await self._structure_text(text)
-        
-        # Step 2: Generate videos with HeyGen
-        processed_segments = await self._generate_videos(
-            segments=segments,
-            front_avatar_id=front_avatar_id,
-            side_avatar_id=side_avatar_id,
-            voice_id=heygen_voice_id,
-            emotion=heygen_emotion,
-            avatar_style=avatar_style,
-            background_color=background_color
-        )
-        
-        # Step 3: Extract audio from B-roll segments
-        if any(s.get("is_broll", False) for s in processed_segments):
-            await self._extract_broll_audio(processed_segments)
+        try:
+            # Step 1: Structure the text with ChatGPT
+            segments = await self._structure_text(text)
             
-            # Step 4: Generate Pexels B-roll videos
-            await self._generate_pexels_broll(processed_segments)
-        
-        # Step 5: Merge final video
-        final_video_path = await self._merge_final_video(
-            processed_segments, 
-            output_filename
-        )
-        
-        # Count each segment type
-        segment_counts = {
-            "front": len([s for s in segments if s["segment_shot"].lower() == "front"]),
-            "side": len([s for s in segments if s["segment_shot"].lower() == "side"]),
-            "broll": len([s for s in segments if s["segment_shot"].lower() == "broll"])
-        }
-        
-        # Create result object
-        result = {
-            "success": True,
-            "final_video": final_video_path,
-            "total_segments": len(segments),
-            "segment_counts": segment_counts,
-            "broll_segments": [s for s in processed_segments if s.get("is_broll", False)],
-            "has_broll": segment_counts["broll"] > 0
-        }
-        
-        self.logger.info(f"Pipeline completed! Final video: {final_video_path}")
-        return result
+            # Step 2: Generate videos with HeyGen
+            processed_segments = await self._generate_videos(
+                segments=segments,
+                front_avatar_id=front_avatar_id,
+                side_avatar_id=side_avatar_id,
+                voice_id=heygen_voice_id,
+                emotion=heygen_emotion,
+                avatar_style=avatar_style,
+                background_color=background_color
+            )
+            
+            # Step 3: Extract audio from B-roll segments
+            if any(s.get("is_broll", False) for s in processed_segments):
+                await self._extract_broll_audio(processed_segments)
+                
+                # Step 4: Generate Pexels B-roll videos
+                await self._generate_pexels_broll(processed_segments)
+            
+            # Step 5: Merge final video
+            final_video_path = await self._merge_final_video(
+                processed_segments, 
+                output_filename
+            )
+            
+            # Count each segment type
+            segment_counts = {
+                "front": len([s for s in segments if s["segment_shot"].lower() == "front"]),
+                "side": len([s for s in segments if s["segment_shot"].lower() == "side"]),
+                "broll": len([s for s in segments if s["segment_shot"].lower() == "broll"])
+            }
+            
+            # Create result object
+            result = {
+                "success": True,
+                "final_video": final_video_path,
+                "total_segments": len(segments),
+                "segment_counts": segment_counts,
+                "broll_segments": [s for s in processed_segments if s.get("is_broll", False)],
+                "has_broll": segment_counts["broll"] > 0
+            }
+            
+            self.logger.info(f"Pipeline completed! Final video: {final_video_path}")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Pipeline error: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
     
     async def _structure_text(self, text: str) -> List[Dict[str, Any]]:
         """
@@ -140,7 +148,7 @@ class Pipeline:
         Returns:
             List of structured segments
         """
-        from text.chatgpt_integration import VideoStructurer
+        from text.processing import VideoStructurer
         
         self.logger.info("Using ChatGPT to structure video with front, side, and broll segments")
         structurer = VideoStructurer(
@@ -183,7 +191,7 @@ class Pipeline:
         Returns:
             List of processed segment information
         """
-        from video.heygen_client import create_heygen_video, poll_video_status, download_video
+        from video.heygen import create_heygen_video, poll_video_status, download_video
         
         self.logger.info(f"Processing {len(segments)} segments with HeyGen")
         
@@ -296,7 +304,7 @@ class Pipeline:
         Returns:
             List of processed segment information
         """
-        from video.heygen_client import create_heygen_video, poll_video_status, download_video
+        from video.heygen import create_heygen_video, poll_video_status, download_video
         
         self.logger.info(f"Processing {len(segments)} segments in parallel using {len(api_keys)} API keys")
         
@@ -369,9 +377,6 @@ class Pipeline:
                     "segment_text": segment_text,
                     "instructions": segment.get("instructions", "") if is_broll else ""
                 }
-            except Exception as e:
-                self.logger.error(f"Error processing segment {segment_index+1}: {str(e)}")
-                raise
             finally:
                 # Always put the API key back in the queue
                 await available_keys.put(api_key)
@@ -402,7 +407,7 @@ class Pipeline:
         Args:
             segments_info: Processed segment information
         """
-        from audio.extraction.extract_broll_audio import extract_audio_from_segments
+        from audio.processing import extract_audio_from_segments
         
         self.logger.info("Extracting audio from B-roll segments")
         broll_segments = [s for s in segments_info if s.get("is_broll", False)]
@@ -411,12 +416,7 @@ class Pipeline:
             self.logger.info("No B-roll segments to process")
             return
         
-        for segment in broll_segments:
-            input_path = segment["path"]
-            output_path = str(Path(input_path).with_suffix(".wav"))
-            segment["audio_path"] = output_path
-        
-        await extract_audio_from_segments(broll_segments)
+        extract_audio_from_segments(broll_segments, self.output_dir)
         
         self.logger.info(f"Extracted audio from {len(broll_segments)} B-roll segments")
     
@@ -427,7 +427,8 @@ class Pipeline:
         Args:
             segments_info: Processed segment information
         """
-        from video.broll.create_pexels_broll import create_broll_videos
+        from video.broll import BRollService, create_broll_segments
+        from text.processing import ContentAnalyzer
         
         self.logger.info("Creating Pexels B-roll videos")
         broll_segments = [s for s in segments_info if s.get("is_broll", False)]
@@ -438,13 +439,21 @@ class Pipeline:
         
         pexels_api_key = self.config.pexels_api_key
         if not pexels_api_key:
-            raise ValueError("Pexels API key is required for B-roll generation")
+            self.logger.warning("Pexels API key is not available. Using original segments for B-roll.")
+            return
         
-        await create_broll_videos(
+        # Create content analyzer for keyword extraction
+        content_analyzer = ContentAnalyzer()
+        
+        # Create B-roll service
+        broll_service = BRollService(pexels_api_key)
+        
+        # Create B-roll segments
+        await create_broll_segments(
             segments=broll_segments,
-            pexels_api_key=pexels_api_key,
-            width=self.width,
-            height=self.height
+            keywords_extractor=content_analyzer.extract_keywords,
+            broll_service=broll_service,
+            output_dir=self.output_dir
         )
         
         self.logger.info(f"Created B-roll videos for {len(broll_segments)} segments")
@@ -464,15 +473,27 @@ class Pipeline:
         Returns:
             Path to the final video
         """
-        from video.merge_segments import merge_video_segments
+        from video.merger import merge_with_broll
         
         self.logger.info("Merging final video")
         output_path = self.output_dir / output_filename
         
-        result = await merge_video_segments(
-            [s["path"] for s in segments_info],
-            str(output_path)
-        )
+        # Check if any segments have B-roll
+        has_broll = any(s.get("is_broll", False) and "broll_video" in s for s in segments_info)
+        
+        if has_broll:
+            # Use B-roll merge
+            result = await merge_with_broll(
+                segments=segments_info,
+                output_path=str(output_path),
+                width=self.width,
+                height=self.height
+            )
+        else:
+            # Use simple merge
+            from video.merger import merge_videos
+            segment_paths = [s["path"] for s in segments_info]
+            result = await merge_videos(segment_paths, str(output_path))
         
         self.logger.info(f"Merged final video: {result}")
-        return result 
+        return result

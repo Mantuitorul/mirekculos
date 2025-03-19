@@ -10,8 +10,16 @@ from pathlib import Path
 
 from core import Pipeline, Config
 
-async def main():
-    """Main entry point for the video generation pipeline."""
+async def main(args=None):
+    """
+    Main entry point for the video generation pipeline.
+    
+    Args:
+        args: Command line arguments (optional, for testing)
+    
+    Returns:
+        Result dictionary from the pipeline
+    """
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="AI Video Generation Pipeline")
     parser.add_argument("--text", type=str, help="Input text for video generation")
@@ -28,39 +36,40 @@ async def main():
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     parser.add_argument("--debug-dir", type=str, default="debug_output", help="Debug output directory")
     
-    args = parser.parse_args()
+    # Parse arguments
+    parsed_args = parser.parse_args(args)
     
     # Ensure either text or text-file is provided
-    if not args.text and not args.text_file:
+    if not parsed_args.text and not parsed_args.text_file:
         parser.error("Either --text or --text-file is required")
     
     # Load text from file if provided
-    if args.text_file:
+    if parsed_args.text_file:
         try:
-            with open(args.text_file, "r", encoding="utf-8") as f:
+            with open(parsed_args.text_file, "r", encoding="utf-8") as f:
                 text = f.read()
         except Exception as e:
             parser.error(f"Error reading text file: {str(e)}")
     else:
-        text = args.text
+        text = parsed_args.text
     
     # Create the pipeline
     pipeline = Pipeline(
-        width=args.width,
-        height=args.height,
-        debug_mode=args.debug,
-        debug_dir=args.debug_dir
+        width=parsed_args.width,
+        height=parsed_args.height,
+        debug_mode=parsed_args.debug,
+        debug_dir=parsed_args.debug_dir
     )
     
     # Run the pipeline
     result = await pipeline.run(
         text=text,
-        front_avatar_id=args.front_avatar,
-        side_avatar_id=args.side_avatar,
-        heygen_voice_id=args.voice_id,
-        heygen_emotion=args.emotion,
-        background_color=args.background,
-        output_filename=args.output
+        front_avatar_id=parsed_args.front_avatar,
+        side_avatar_id=parsed_args.side_avatar,
+        heygen_voice_id=parsed_args.voice_id,
+        heygen_emotion=parsed_args.emotion,
+        background_color=parsed_args.background,
+        output_filename=parsed_args.output
     )
     
     # Print result summary
@@ -84,18 +93,20 @@ async def main():
                     print(f"     B-roll video: {segment['broll_video']}")
         
         # Show debug info if enabled
-        if args.debug:
-            debug_path = Path(args.debug_dir) / "segments_*.json"
+        if parsed_args.debug:
+            debug_path = Path(parsed_args.debug_dir) / "segments_*.json"
             print(f"\nDebug files saved to: {debug_path}")
     else:
         print(f"❌ Error: {result.get('error', 'Unknown error')}")
+    
+    return result
 
 
 if __name__ == "__main__":
     # Set up logging
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
     
-    # Example text
+    # Example text for Romanian video
     EXAMPLE_TEXT = """
     Educația românească intră într-o nouă eră: Ministerul Educației devine Ministerul Educației și Cercetării!
     Elevii, studenții, profesorii și chiar antreprenorii au acum șansa să profite de un viitor mai dinamic și orientat spre tehnologie.
@@ -103,33 +114,30 @@ if __name__ == "__main__":
     """
     
     # Example avatar IDs
-    FRONT_MODEL_ID = "Raul_sitting_sofa_front_close"  # woman_prim_plan_gesturi_front
-    SIDE_MODEL_ID = "Raul_sitting_sofa_side_close"    # woman_plan_mediu_gesturi_side
+    FRONT_AVATAR_ID = "Raul_sitting_sofa_front_close"  # woman_prim_plan_gesturi_front
+    SIDE_AVATAR_ID = "Raul_sitting_sofa_side_close"    # woman_plan_mediu_gesturi_side
     
     # Example voice ID
-    HEYGEN_VOICE_ID = "a426f8a763824ceaad3a2eb29c68e121"
+    VOICE_ID = "a426f8a763824ceaad3a2eb29c68e121"
     
-    # Example emotion
-    HEYGEN_EMOTION = "Friendly"
+    # Try to parse any provided arguments
+    args = sys.argv[1:] if len(sys.argv) > 1 else None
     
-    # When called without arguments, run with example values
-    parser = argparse.ArgumentParser()
-    args = parser.parse_args()
-    
-    if len(vars(args)) == 0:
+    # If no arguments provided, run with example values
+    if not args:
         print("No arguments provided. Running with example values:")
-        print(f"  Front avatar: {FRONT_MODEL_ID}")
-        print(f"  Side avatar: {SIDE_MODEL_ID}")
-        print(f"  Voice ID: {HEYGEN_VOICE_ID}")
-        print(f"  Emotion: {HEYGEN_EMOTION}")
+        print(f"  Front avatar: {FRONT_AVATAR_ID}")
+        print(f"  Side avatar: {SIDE_AVATAR_ID}")
+        print(f"  Voice ID: {VOICE_ID}")
+        print(f"  Emotion: Friendly")
         
         asyncio.run(main([
             "--text", EXAMPLE_TEXT,
-            "--front-avatar", FRONT_MODEL_ID,
-            "--side-avatar", SIDE_MODEL_ID,
-            "--voice-id", HEYGEN_VOICE_ID,
-            "--emotion", HEYGEN_EMOTION,
+            "--front-avatar", FRONT_AVATAR_ID,
+            "--side-avatar", SIDE_AVATAR_ID,
+            "--voice-id", VOICE_ID,
+            "--emotion", "Friendly",
             "--debug"
         ]))
     else:
-        asyncio.run(main()) 
+        asyncio.run(main())
