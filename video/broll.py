@@ -12,9 +12,9 @@ import asyncio
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
+from moviepy import *
+from moviepy import VideoFileClip 
 
-# Import for video processing
-from moviepy.video.io.VideoFileClip import VideoFileClip
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -169,7 +169,8 @@ class BRollService:
         size: str = "medium",
         max_videos: int = 3,
         min_duration: int = 3,
-        max_duration: int = 8
+        max_duration: int = 8,
+        translate: bool = True
     ) -> List[Dict[str, Any]]:
         """
         Get B-roll videos for a list of keywords.
@@ -182,6 +183,7 @@ class BRollService:
             max_videos: Maximum number of videos to download
             min_duration: Minimum video duration
             max_duration: Maximum video duration
+            translate: Whether to translate non-English keywords
             
         Returns:
             List of dictionaries with video information
@@ -190,11 +192,22 @@ class BRollService:
         broll_dir = output_dir / "broll"
         broll_dir.mkdir(exist_ok=True, parents=True)
         
+        # Translate keywords if needed
+        if translate:
+            from core.config import Config
+            config = Config()
+            openai_api_key = config.openai_api_key
+            if openai_api_key:
+                # Try to translate keywords to English
+                translated_keywords = await translate_keywords_with_openai(keywords, openai_api_key)
+                if translated_keywords and len(translated_keywords) > 0:
+                    keywords = translated_keywords
+        
         # Try to get videos for each keyword until we reach max_videos
         for keyword in keywords:
             if len(broll_videos) >= max_videos:
                 break
-                
+            
             try:
                 # Search for videos matching this keyword
                 results = await self.search_videos(
@@ -229,7 +242,7 @@ class BRollService:
             except Exception as e:
                 logger.error(f"Error getting B-roll for '{keyword}': {str(e)}")
                 continue
-                
+            
         logger.info(f"Downloaded {len(broll_videos)} B-roll videos for keywords: {keywords}")
         return broll_videos
 
@@ -324,7 +337,13 @@ async def extract_audio(video_path: str, output_path: str) -> bool:
         
         # Extract audio
         audio_clip = video_clip.audio
-        audio_clip.write_audiofile(output_path, codec="libmp3lame", verbose=False, logger=None)
+        
+        # Write audio to file - removed verbose parameter that causes errors
+        audio_clip.write_audiofile(
+            output_path, 
+            codec="libmp3lame",
+            logger=None  # Use logger=None instead of verbose=False
+        )
         
         # Close clips
         audio_clip.close()
@@ -405,9 +424,65 @@ async def create_broll_segments(segments: List[Dict[str, Any]], keywords_extract
     logger.info(f"Created {len(broll_segments)} B-roll segments")
     return broll_segments
 
+async def translate_keywords_with_openai(keywords: List[str], api_key: Optional[str] = None) -> List[str]:
+    """
+    Translate keywords to English and optimize them for video search using OpenAI.
+    
+    Args:
+        keywords: List of keywords in any language
+        api_key: OpenAI API key (optional)
+        
+    Returns:
+        List of translated and optimized English keywords
+    """
+    openai_api_key = api_key or os.getenv("OPENAI_API_KEY")
+    if not openai_api_key:
+        logger.warning("No OpenAI API key available for keyword translation")
+        return keywords
+    
+    try:
+        logger.info(f"Translating keywords using OpenAI: {keywords}")
+        
+        # Initialize OpenAI client
+        client = OpenAI(api_key=openai_api_key)
+        
+        # Create prompt for translation and optimization
+        prompt = f"""
+        Translate these keywords to English and optimize them for video stock footage search.
+        Focus on visual terms that would work well for video search.
+        Keep each term short and specific (1-2 words if possible).
+        
+        Keywords: {', '.join(keywords)}
+        
+        Return only the translated keywords, one per line. No explanations or numbering.
+        """
+        
+        # Use cheaper model for translation
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that translates keywords to English and optimizes them for video search."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=100
+        )
+        
+        # Parse response and get keywords
+        text = response.choices[0].message.content.strip()
+        translated_keywords = [line.strip() for line in text.split("\n") if line.strip()]
+        
+        logger.info(f"Translated keywords: {translated_keywords}")
+        return translated_keywords
+        
+    except Exception as e:
+        logger.error(f"Error translating keywords: {e}")
+        return keywords
+
 def combine_video_with_audio(video_path: str, audio_path: str, output_path: str, target_width: int = 720, target_height: int = 1280) -> bool:
     """
-    Combine a video file with an audio file.
+    Combine a video file with an audio file using FFmpeg directly.
+    Ensures that the full audio is preserved by adjusting the video length.
     
     Args:
         video_path: Path to the video file
@@ -420,36 +495,152 @@ def combine_video_with_audio(video_path: str, audio_path: str, output_path: str,
         True if successful, False otherwise
     """
     try:
-        # Load the video and audio
-        video = VideoFileClip(video_path)
-        audio = VideoFileClip(audio_path).audio
+        import os
+        import subprocess
+        from pathlib import Path
         
-        # Resize the video if needed
-        if video.size != (target_width, target_height):
-            video = video.resize(width=target_width, height=target_height)
-        
-        # Combine the video and audio
-        combined = video.set_audio(audio)
+        logger.info(f"Combining video {video_path} with audio {audio_path}")
         
         # Ensure the output directory exists
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
-        # Write the combined video
-        combined.write_videofile(
-            output_path,
-            codec="libx264",
-            audio_codec="aac",
-            temp_audiofile=f"{output_path}_temp_audio.m4a",
-            remove_temp=True,
-            verbose=False,
-            logger=None
-        )
+        # Get audio duration
+        audio_duration_cmd = [
+            'ffprobe', 
+            '-v', 'error', 
+            '-show_entries', 'format=duration', 
+            '-of', 'default=noprint_wrappers=1:nokey=1', 
+            audio_path
+        ]
         
-        # Close the clips
-        video.close()
-        combined.close()
+        audio_duration_process = subprocess.run(audio_duration_cmd, capture_output=True, text=True)
+        if audio_duration_process.returncode != 0:
+            logger.error(f"Error getting audio duration: {audio_duration_process.stderr}")
+            audio_duration = None
+        else:
+            try:
+                audio_duration = float(audio_duration_process.stdout.strip())
+                logger.info(f"Audio duration: {audio_duration} seconds")
+            except ValueError:
+                logger.error(f"Could not parse audio duration: {audio_duration_process.stdout}")
+                audio_duration = None
         
+        # Get video duration
+        video_duration_cmd = [
+            'ffprobe', 
+            '-v', 'error', 
+            '-show_entries', 'format=duration', 
+            '-of', 'default=noprint_wrappers=1:nokey=1', 
+            video_path
+        ]
+        
+        video_duration_process = subprocess.run(video_duration_cmd, capture_output=True, text=True)
+        if video_duration_process.returncode != 0:
+            logger.error(f"Error getting video duration: {video_duration_process.stderr}")
+            video_duration = None
+        else:
+            try:
+                video_duration = float(video_duration_process.stdout.strip())
+                logger.info(f"Video duration: {video_duration} seconds")
+            except ValueError:
+                logger.error(f"Could not parse video duration: {video_duration_process.stdout}")
+                video_duration = None
+                
+        logger.info(f"Using FFmpeg to combine and resize the video and audio")
+        
+        if audio_duration and video_duration and audio_duration > video_duration:
+            # If audio is longer than video, create a looping video by concatenating with itself
+            # Calculate how many times we need to loop the video
+            loop_count = int(audio_duration / video_duration) + 1
+            logger.info(f"Audio ({audio_duration}s) is longer than video ({video_duration}s). Creating {loop_count} loops.")
+            
+            # Create a temporary file for the list of videos to concatenate
+            temp_concat_list = Path(os.path.dirname(output_path)) / "concat_list.txt"
+            with open(temp_concat_list, 'w') as f:
+                for _ in range(loop_count):
+                    f.write(f"file '{os.path.basename(video_path)}'\n")
+            
+            # First create a looped video with correct duration
+            temp_looped_video = Path(os.path.dirname(output_path)) / "temp_looped.mp4"
+            
+            # Copy video to the same directory as concat list for it to work properly
+            temp_video_path = Path(os.path.dirname(output_path)) / os.path.basename(video_path)
+            if not os.path.exists(temp_video_path):
+                import shutil
+                shutil.copy(video_path, temp_video_path)
+            
+            loop_cmd = [
+                'ffmpeg',
+                '-y',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', str(temp_concat_list),
+                '-c', 'copy',
+                '-t', str(audio_duration),  # Trim to audio duration
+                str(temp_looped_video)
+            ]
+            
+            logger.info(f"Creating looped video: {' '.join(loop_cmd)}")
+            loop_process = subprocess.run(loop_cmd, capture_output=True, text=True)
+            
+            if loop_process.returncode != 0:
+                logger.error(f"Error creating looped video: {loop_process.stderr}")
+                return False
+            
+            # Now combine the looped video with audio
+            command = [
+                'ffmpeg',
+                '-y',                                    # Overwrite output files
+                '-i', str(temp_looped_video),           # Looped video input
+                '-i', audio_path,                        # Audio input
+                '-filter_complex',                       # Use complex filter
+                f"[0:v]scale={target_width}:{target_height},setsar=1[v]",  # Scale video
+                '-map', '[v]',                           # Map scaled video
+                '-map', '1:a',                           # Map audio from second input
+                '-c:v', 'libx264',                       # Video codec
+                '-c:a', 'aac',                           # Audio codec
+                output_path
+            ]
+            
+            # Run the final combination command
+            logger.info(f"Running ffmpeg command: {' '.join(command)}")
+            process = subprocess.run(command, capture_output=True, text=True)
+            
+            # Clean up temporary files
+            if os.path.exists(str(temp_concat_list)):
+                os.remove(str(temp_concat_list))
+            if os.path.exists(str(temp_looped_video)):
+                os.remove(str(temp_looped_video))
+            if os.path.exists(str(temp_video_path)):
+                os.remove(str(temp_video_path))
+                
+        else:
+            # Standard approach, but ensuring we keep the full audio
+            command = [
+                'ffmpeg',
+                '-y',                                    # Overwrite output files
+                '-i', video_path,                        # Video input
+                '-i', audio_path,                        # Audio input
+                '-filter_complex',                       # Use complex filter
+                f"[0:v]scale={target_width}:{target_height},setsar=1[v]",  # Scale video
+                '-map', '[v]',                           # Map scaled video
+                '-map', '1:a',                           # Map audio from second input
+                '-c:v', 'libx264',                       # Video codec
+                '-c:a', 'aac',                           # Audio codec
+                output_path
+            ]
+            
+            # Run the standard command
+            logger.info(f"Running ffmpeg command: {' '.join(command)}")
+            process = subprocess.run(command, capture_output=True, text=True)
+        
+        if process.returncode != 0:
+            logger.error(f"FFmpeg error: {process.stderr}")
+            return False
+                    
+        logger.info(f"Successfully combined video and audio: {output_path}")
         return True
+        
     except Exception as e:
         logger.error(f"Error combining video and audio: {str(e)}")
         return False
