@@ -30,6 +30,8 @@ ENV/
 env/
 .venv/
 .env
+output
+debug_output
 
 # Media files
 *.mp3

@@ -8,7 +8,7 @@ Handles environment variables, logging setup, and directory management.
 import os
 import logging
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Any
 from dotenv import load_dotenv, find_dotenv
 
 def setup_logging(level=logging.INFO):
@@ -27,7 +27,7 @@ def setup_logging(level=logging.INFO):
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("moviepy").setLevel(logging.WARNING)
 
-def load_environment() -> Dict[str, str]:
+def load_environment() -> Dict[str, Any]:
     """
     Load environment variables from .env file.
     
@@ -47,18 +47,41 @@ def load_environment() -> Dict[str, str]:
     
     load_dotenv(env_file, override=True)
     
-    heygen_api_key = os.getenv("HEYGEN_API_KEY")
-    elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+    # Load all HeyGen API keys (looking for HEYGEN_API_KEY_BE, HEYGEN_API_KEY_MIR, etc.)
+    heygen_api_keys = []
+    for key in os.environ:
+        if key.startswith("HEYGEN_API_KEY_"):
+            heygen_api_keys.append(os.environ[key])
     
-    if not heygen_api_key:
-        raise ValueError("HEYGEN_API_KEY not found in environment variables")
+    # Fallback to single key if no prefixed keys found
+    if not heygen_api_keys:
+        heygen_api_key = os.getenv("HEYGEN_API_KEY")
+        if heygen_api_key:
+            heygen_api_keys.append(heygen_api_key)
+    
+    elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    pexels_api_key = os.getenv("PEXELS_API_KEY")
+    
+    if not heygen_api_keys:
+        raise ValueError("No HEYGEN_API_KEY found in environment variables")
     
     if not elevenlabs_api_key:
         raise ValueError("ELEVENLABS_API_KEY not found in environment variables")
+    
+    if not pexels_api_key:
+        logger.warning("PEXELS_API_KEY not found in environment variables. B-roll fetching will not work.")
+    
+    if not openai_api_key:
+        logger.warning("OPENAI_API_KEY not found in environment variables. ChatGPT integration will not work.")
+    
+    logger.info(f"Loaded {len(heygen_api_keys)} HeyGen API keys")
         
     return {
-        "heygen_api_key": heygen_api_key,
-        "elevenlabs_api_key": elevenlabs_api_key
+        "HEYGEN_API_KEYS": heygen_api_keys,
+        "ELEVENLABS_API_KEY": elevenlabs_api_key,
+        "OPENAI_API_KEY": openai_api_key,
+        "PEXELS_API_KEY": pexels_api_key
     }
 
 def ensure_output_dir(directory: Path) -> Path:
