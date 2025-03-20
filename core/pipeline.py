@@ -3,6 +3,7 @@
 Main Pipeline class for orchestrating the video generation process.
 """
 
+import os
 import asyncio
 import logging
 import json
@@ -20,6 +21,7 @@ class Pipeline:
     2. Generate videos for each segment with HeyGen
     3. Process B-roll segments with Pexels footage
     4. Merge all segments into final video
+    5. Optionally remove silence from the final video
     """
     
     def __init__(
@@ -63,7 +65,11 @@ class Pipeline:
         heygen_emotion: Optional[str] = None,
         avatar_style: str = "normal",
         background_color: str = "#008000",
-        output_filename: str = "final_output.mp4"
+        output_filename: str = "final_output.mp4",
+        remove_silence: bool = False,
+        silence_threshold: float = -30,
+        min_silence_duration: float = 0.3,
+        silence_keep_ratio: float = 0.2
     ) -> Dict[str, Any]:
         """
         Run the full pipeline.
@@ -77,6 +83,10 @@ class Pipeline:
             avatar_style: Avatar style (normal, happy, etc.)
             background_color: Background color (hex)
             output_filename: Filename for the final output video
+            remove_silence: Whether to remove silence from the final video
+            silence_threshold: Silence threshold in dB (default: -30)
+            min_silence_duration: Minimum silence duration in seconds (default: 0.3)
+            silence_keep_ratio: Ratio of silence to keep (0-1) for smooth transitions (default: 0.2)
             
         Returns:
             Dict with pipeline results
@@ -110,6 +120,16 @@ class Pipeline:
                 processed_segments, 
                 output_filename
             )
+            
+            # Step 6: Remove silence if requested
+            if remove_silence and final_video_path:
+                self.logger.info("Removing silence from final video...")
+                final_video_path = await self._remove_silence(
+                    input_path=final_video_path,
+                    silence_threshold=silence_threshold,
+                    min_silence_duration=min_silence_duration,
+                    keep_ratio=silence_keep_ratio
+                )
             
             # Count each segment type
             segment_counts = {
@@ -422,12 +442,12 @@ class Pipeline:
     
     async def _generate_pexels_broll(self, segments_info: List[Dict[str, Any]]) -> None:
         """
-        Generate Pexels B-roll videos for B-roll segments.
+        Generate Pexels B-roll videos for B-roll segments and combine with audio.
         
         Args:
             segments_info: Processed segment information
         """
-        from video.broll import BRollService, create_broll_segments
+        from video.broll import BRollService, create_broll_segments, combine_video_with_audio
         from text.processing import ContentAnalyzer
         
         self.logger.info("Creating Pexels B-roll videos")
@@ -449,14 +469,52 @@ class Pipeline:
         broll_service = BRollService(pexels_api_key)
         
         # Create B-roll segments
-        await create_broll_segments(
+        updated_broll_segments = await create_broll_segments(
             segments=broll_segments,
             keywords_extractor=content_analyzer.extract_keywords,
             broll_service=broll_service,
             output_dir=self.output_dir
         )
         
+        # Save the results to processing_results.json
+        with open(self.output_dir / "processing_results.json", "w") as f:
+            json.dump(segments_info, f, indent=2)
+        
         self.logger.info(f"Created B-roll videos for {len(broll_segments)} segments")
+        
+        # Combine B-roll videos with audio for all segments that need it
+        broll_dir = self.output_dir / "broll"
+        broll_dir.mkdir(exist_ok=True, parents=True)
+        
+        # For each B-roll segment, combine the B-roll video with the audio
+        for segment in [s for s in segments_info if s.get("is_broll", False) or s.get("has_broll", False)]:
+            broll_path = segment.get("broll_video")
+            audio_path = segment.get("audio_path")
+            segment_idx = segment.get("order")
+            
+            if broll_path and audio_path and os.path.exists(broll_path) and os.path.exists(audio_path):
+                self.logger.info(f"Combining B-roll video with audio for segment {segment_idx}")
+                output_video_path = broll_dir / f"broll_segment_{segment_idx}.mp4"
+                
+                # Run in a thread pool since video operations are CPU-bound
+                loop = asyncio.get_event_loop()
+                success = await loop.run_in_executor(
+                    None, 
+                    lambda: combine_video_with_audio(
+                        broll_path,
+                        audio_path,
+                        str(output_video_path),
+                        self.width,
+                        self.height
+                    )
+                )
+                
+                if success:
+                    self.logger.info(f"Successfully combined B-roll with audio for segment {segment_idx}")
+                    # Update the segment with the new combined video path
+                    segment["broll_video"] = str(output_video_path)
+                else:
+                    self.logger.error(f"Failed to combine B-roll with audio for segment {segment_idx}")
     
     async def _merge_final_video(
         self, 
@@ -479,7 +537,7 @@ class Pipeline:
         output_path = self.output_dir / output_filename
         
         # Check if any segments have B-roll
-        has_broll = any(s.get("is_broll", False) and "broll_video" in s for s in segments_info)
+        has_broll = any(s.get("is_broll", False) or s.get("has_broll", False) for s in segments_info)
         
         if has_broll:
             # Use B-roll merge
@@ -497,3 +555,52 @@ class Pipeline:
         
         self.logger.info(f"Merged final video: {result}")
         return result
+    
+    async def _remove_silence(
+        self, 
+        input_path: str,
+        output_path: Optional[str] = None,
+        silence_threshold: float = -30,
+        min_silence_duration: float = 0.3,
+        keep_ratio: float = 0.2
+    ) -> str:
+        """
+        Remove silence from the final video.
+        
+        Args:
+            input_path: Path to the input video
+            output_path: Path for the output video (default: input_path with _no_silence suffix)
+            silence_threshold: Silence threshold in dB (default: -30)
+            min_silence_duration: Minimum silence duration in seconds (default: 0.3)
+            keep_ratio: Ratio of silence to keep (0-1) for smooth transitions (default: 0.2)
+            
+        Returns:
+            Path to the output video
+        """
+        from audio.scilence_remover import remove_silence
+        
+        self.logger.info(f"Removing silence from {input_path}")
+        
+        if not output_path:
+            input_file = Path(input_path)
+            output_path = str(input_file.parent / f"{input_file.stem}_no_silence{input_file.suffix}")
+        
+        # Run in a thread pool since remove_silence is CPU-bound
+        loop = asyncio.get_event_loop()
+        success = await loop.run_in_executor(
+            None, 
+            lambda: remove_silence(
+                input_path, 
+                output_path, 
+                silence_threshold=silence_threshold,
+                min_silence_duration=min_silence_duration,
+                keep_ratio=keep_ratio
+            )
+        )
+        
+        if success:
+            self.logger.info(f"Successfully removed silence: {output_path}")
+            return output_path
+        else:
+            self.logger.error("Failed to remove silence")
+            return input_path  # Return original path if silence removal fails
