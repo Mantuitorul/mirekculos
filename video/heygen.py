@@ -97,6 +97,7 @@ async def create_heygen_video(
                 "value": background_color
             }
         }],
+        "caption": False,
         "dimension": {
             "width": width,
             "height": height
