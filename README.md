@@ -8,9 +8,11 @@ A modular, clean pipeline for generating AI videos from text using HeyGen avatar
 - Automatically structure content with ChatGPT
 - Use HeyGen for AI avatar generation
 - Enhance videos with B-roll footage from Pexels
+- API endpoint for video generation via HTTP requests
 - Modular architecture for easy maintenance
 - Support for parallel processing with multiple API keys
 - Configurable video resolution, styling and formatting
+- Automatic silence removal for better-paced videos
 
 ## Project Structure
 
@@ -32,8 +34,13 @@ The project follows a clean, modular structure:
 │   └── merger.py          # Video merging
 ├── audio/
 │   ├── __init__.py
-│   └── processing.py      # Audio generation and processing
+│   ├── processing.py      # Audio generation and processing
+│   └── scilence_remover.py # Silence removal for better pacing
+├── api.py                 # FastAPI endpoint for HTTP access
 ├── main.py                # Command-line entry point
+├── examples/              # Example usage
+│   ├── example_usage.py   # Python API client example
+│   └── curl_examples.sh   # cURL examples
 ├── requirements.txt       # Dependencies
 └── README.md              # This file
 ```
@@ -92,6 +99,77 @@ python main.py --text "Your text here" --front-avatar "avatar_id_1" --side-avata
 - `--debug`: Enable debug mode
 - `--debug-dir`: Debug output directory (default: "debug_output")
 
+### HTTP API Endpoint
+
+The project includes a FastAPI endpoint for generating videos via HTTP requests. This enables integration with web applications or other services.
+
+#### Running the API Server
+
+```bash
+python api.py
+```
+
+Or with Uvicorn directly:
+
+```bash
+uvicorn api:app --host 0.0.0.0 --port 8000 --reload
+```
+
+The API will be available at http://localhost:8000, and interactive documentation at http://localhost:8000/docs.
+
+#### API Endpoints
+
+- `POST /generate-reel`: Start a new video generation process
+- `GET /process/{process_id}`: Check the status of a process
+- `GET /processes`: List all processes
+- `GET /download/{process_id}`: Download the generated video
+- `DELETE /process/{process_id}`: Delete a process and its files
+- `GET /health`: Check API health status
+
+#### Example API Request
+
+```json
+{
+  "text": "Your text content here",
+  "voice_id_1": "a426f8a763824ceaad3a2eb29c68e121",
+  "look_id_1": "Raul_sitting_sofa_front_close",
+  "look_id_2": "Raul_sitting_sofa_side_close",
+  "remove_silence": true,
+  "emotion": "Friendly",
+  "background_color": "#008000"
+}
+```
+
+#### Example Usage
+
+See the `examples` directory for complete usage examples in Python and cURL.
+
+Python example:
+```python
+# Simple API client example
+import requests
+
+# Start a process
+response = requests.post("http://localhost:8000/generate-reel", json={
+    "text": "Your text here",
+    "voice_id_1": "your_voice_id",
+    "look_id_1": "front_avatar_id",
+    "look_id_2": "side_avatar_id"
+})
+
+process_id = response.json()["process_id"]
+
+# Check status
+status = requests.get(f"http://localhost:8000/process/{process_id}").json()
+print(f"Status: {status['status']}")
+
+# Download when complete
+if status["status"] == "completed":
+    video = requests.get(f"http://localhost:8000/download/{process_id}")
+    with open("output.mp4", "wb") as f:
+        f.write(video.content)
+```
+
 ### Python API
 
 You can also use the pipeline as a Python API:
@@ -127,6 +205,7 @@ asyncio.run(generate_video())
 2. **Video Generation**: Videos are generated with HeyGen for each segment.
 3. **B-roll Processing**: If the segment is marked as B-roll, audio is extracted and used with video footage from Pexels.
 4. **Video Merging**: All segments are merged into a final video with B-roll replacements as needed.
+5. **Silence Removal**: Optionally remove silence from the final video to improve pacing.
 
 ## Configuration
 
@@ -149,6 +228,7 @@ pipeline = Pipeline(config=config)
 ## Requirements
 
 - Python 3.8+
+- FastAPI and Uvicorn (for API endpoint)
 - API keys for:
   - HeyGen (for avatar generation)
   - OpenAI (for ChatGPT integration)
